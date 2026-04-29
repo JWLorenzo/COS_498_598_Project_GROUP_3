@@ -16,16 +16,23 @@ USE_GPU = True
 RERUN = False
 MAX_N = 2
 REPLACEMENTS = 6
+BATCH = 64
+CLEAN = True
 
 
 def create_emoji_mapping(
-    merged: pd.DataFrame, model: SentenceTransformer
+    merged: pd.DataFrame, model: SentenceTransformer, nlp: Language
 ) -> list[tuple[str, NDArray[np.float32]]]:
-    sents: list[str] = merged["text"].tolist()
+    if CLEAN:
+        sents: list[str] = T.clean_spaCy_batch(merged["text"].tolist(), nlp, BATCH)
+    else:
+        sents: list[str] = merged["text"].tolist()
     emoji_set: set[str] = set(
         emoji for emojis in merged["emoji_list"].tolist() for emoji in emojis
     )
     vectors: NDArray[np.float32] = encoder(model, sents)
+
+    # This list comprehension is just creating a mapping of emojis to vectors where we add the vector to that associated emojis list if that emoji is in the translated string
     emoji_mapping: list[tuple[str, list[NDArray[np.float32]]]] = [
         (
             emoji,
@@ -38,6 +45,7 @@ def create_emoji_mapping(
         for emoji in emoji_set
     ]
 
+    # We just get all of the emoji - vector pairs, but average the vector
     return [(emoji, np.mean(vec, 0)) for emoji, vec in emoji_mapping]
 
 
@@ -56,7 +64,7 @@ def encoder(
 
 
 def initialize_data(
-    model: SentenceTransformer,
+    model: SentenceTransformer, nlp: Language
 ) -> tuple[list[str], NDArray[np.float32]]:
     merged: pd.DataFrame = D.process_dataframes(*D.get_dataset_contents())
     merged = merged.dropna(subset=["text"])
@@ -65,7 +73,9 @@ def initialize_data(
         merged = merged[:SAMPLE]
 
     merged["emoji_list"] = merged["emoji"].apply(T.process_emojis)
-    mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(merged, model)
+    mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(
+        merged, model, nlp
+    )
     vectors: NDArray[np.float32] = np.array([vector for _, vector in mapping])
     emojis: list[str] = [emoji for emoji, _ in mapping]
     return (emojis, vectors)
@@ -123,7 +133,7 @@ def construct_sentence(
 
 def main(model: SentenceTransformer, nlp: Language) -> None:
     if not D.make_data_dir() or RERUN:
-        emojis, vec_array = initialize_data(model)
+        emojis, vec_array = initialize_data(model, nlp)
         D.save_data(vec_array, emojis)
     else:
         vec_array, emojis = D.load_data()

@@ -6,22 +6,6 @@ from spacy.language import Language
 import emoji
 
 
-## Useless now, but keeping incase ##
-
-# def add_padding(
-#     sentence: list[str], n: int, left: str = "#", right: str = "#"
-# ) -> list[str]:
-#     return [left] * (n - 1) + sentence + [right] * (n - 1)
-
-# def pad_sentences(sentences: list[list[str]], n: int) -> list[list[str]]:
-#     results: list[list[str]] = []
-#     for sentence in sentences:
-#         result = add_padding(sentence, n)
-#         print(result)
-#         results.append(result)
-#     return results
-
-
 def process_emojis(emoji_str: str) -> list[str]:
     ej_list: list[str] = []
     for ej in emoji.emoji_list(emoji_str):
@@ -39,6 +23,30 @@ def clean_spaCy_single(text: str, nlp: Language) -> list[Token]:
     return tokens
 
 
+def clean_spaCy_batch(text: list[str], nlp: Language, batch: int) -> list[str]:
+    cleaned: list[str] = []
+
+    for doc in nlp.pipe(text, batch_size=batch, disable=["ner", "parser"]):
+        print(doc)
+        tokens = [
+            token
+            for token in doc
+            if not any([token.is_punct, token.is_space, token.is_stop])
+        ]
+        cleaned.append(" ".join(token.text for token in tokens))
+    return cleaned
+
+
+def clean_spaCy_non_token(text: str, nlp: Language) -> str:
+    doc = nlp(text)
+    tokens = [
+        token
+        for token in doc
+        if not any([token.is_punct, token.is_space, token.is_stop])
+    ]
+    return " ".join([token.text for token in tokens])
+
+
 def extract_ngram(tokens: list[Token], n: int) -> list[tuple[str, int, int]]:
 
     n_grams: list[tuple[str, int, int]] = []
@@ -52,12 +60,3 @@ def extract_ngram(tokens: list[Token], n: int) -> list[tuple[str, int, int]]:
             )
         )
     return n_grams
-
-
-# def extract_ngrams(merged: pd.DataFrame, n: int, nlp:Language) -> list[list[tuple[str, int, int]]]:
-#     results: list[list[tuple[str, int, int]]] = []
-#     for _, row in merged.iterrows():
-#         result: list[Token] = clean_spaCy_single(str(row[C.CSV_COLUMN]), nlp)
-#         results.append(extract_ngram(result, n))
-
-#     return results
