@@ -64,7 +64,7 @@ def process_dataframes(
     df_3.columns = df_3.columns.str.strip()
     df_2 = df_2.rename(columns=RENAME_DICT)
     df_3 = df_3.rename(columns=RENAME_DICT)
-    df_4 = pd.concat([df_1, df_2, df_3], ignore_index=False)
+    df_4 = pd.concat([df_1, df_2, df_3], ignore_index=True)
     df_4.to_csv(DATA_PATH / MERGE_NAME)
 
     return df_4

@@ -56,7 +56,7 @@ def initialize_data(
     model: SentenceTransformer, nlp: Language, args: Namespace
 ) -> tuple[list[str], NDArray[np.float32]]:
     merged: pd.DataFrame = D.process_dataframes(*D.get_dataset_contents())
-    merged = merged.dropna(subset=["text"])
+    merged = merged.dropna(subset=["text", "emoji"])
 
     merged["emoji_list"] = merged["emoji"].apply(T.process_emojis)
     mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(
@@ -81,6 +81,7 @@ def get_top_k(similarities: NDArray[np.float32], k: int) -> NDArray[np.intp]:
 
 def get_emoji_slices(
     selection_sorted: list[tuple[tuple[str, int, int], str, np.float32]],
+    args: Namespace,
 ) -> list[tuple[tuple[str, int, int], str, np.float32]]:
     selected: list[tuple[tuple[str, int, int], str, np.float32]] = []
     count: int = 0
@@ -147,7 +148,7 @@ def main(model: SentenceTransformer, nlp: Language, args: Namespace) -> None:
     )
 
     selected_sorted: list[tuple[tuple[str, int, int], str, np.float32]] = (
-        get_emoji_slices(selection_sorted)
+        get_emoji_slices(selection_sorted, args)
     )
 
     final_list: str = construct_sentence(selected_sorted, args.text)
