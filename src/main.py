@@ -113,7 +113,7 @@ def get_emoji_slices(
     selected: list[tuple[tuple[str, int, int], str, np.float32]] = []
     count: int = 0
     curr_idx: int = 0
-    while count < args.repl or curr_idx < len(selection_sorted):
+    while count < args.repl and curr_idx < len(selection_sorted):
         s1: int = selection_sorted[curr_idx][0][1]
         e1: int = selection_sorted[curr_idx][0][2]
         no_overlap: bool = not any(
