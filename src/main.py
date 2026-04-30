@@ -10,6 +10,7 @@ from spacy.language import Language
 from argparse import ArgumentParser
 from argparse import Namespace
 from argparse import ArgumentTypeError
+import emoji
 
 
 def create_emoji_mapping(
@@ -55,13 +56,28 @@ def encoder(
 def initialize_data(
     model: SentenceTransformer, nlp: Language, args: Namespace
 ) -> tuple[list[str], NDArray[np.float32]]:
-    merged: pd.DataFrame = D.process_dataframes(*D.get_dataset_contents())
-    merged = merged.dropna(subset=["text", "emoji"])
+    if not args.emoji:
+        merged: pd.DataFrame = D.process_dataframes(*D.get_dataset_contents())
+        merged = merged.dropna(subset=["text", "emoji"])
 
-    merged["emoji_list"] = merged["emoji"].apply(T.process_emojis)
-    mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(
-        merged, model, nlp, args
-    )
+        merged["emoji_list"] = merged["emoji"].apply(T.process_emojis)
+        mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(
+            merged, model, nlp, args
+        )
+    else:
+        merged: pd.DataFrame = pd.DataFrame.from_dict(
+            {
+                "emoji_list": [ej for ej in emoji.EMOJI_DATA],
+                "text": [
+                    text["en"].strip(":").replace("_", " ")
+                    for text in emoji.EMOJI_DATA.values()
+                ],
+            }
+        )
+        mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(
+            merged, model, nlp, args
+        )
+
     vectors: NDArray[np.float32] = np.array([vector for _, vector in mapping])
     emojis: list[str] = [emoji for emoji, _ in mapping]
     return (emojis, vectors)
@@ -133,8 +149,8 @@ def main(model: SentenceTransformer, nlp: Language, args: Namespace) -> None:
 
     similarities: NDArray[np.float32] = np.array(
         [
-            get_similarities(encoder(model, n_gram[0], args), vec_array)
-            for n_gram in n_grams
+            get_similarities(n_vec, vec_array)
+            for n_vec in encoder(model, [ngram[0] for ngram in n_grams], args)
         ]
     )
 
@@ -174,13 +190,17 @@ if __name__ == "__main__":
     parser: ArgumentParser = ArgumentParser(
         description="Minimizing Language With Emojis"
     )
+    parser.add_argument(
+        "-e", "--emoji", help="Use emoji dict instead of corpus", action="store_true"
+    )
+
     parser.add_argument("-g", "--gpu", help="Use CUDA?", action="store_true")
     parser.add_argument("-r", "--rerun", help="Rerun the pipeline", action="store_true")
     parser.add_argument(
         "-n", "--ngram", help="Max ngram size", type=check_positive, default=2
     )
     parser.add_argument(
-        "-p", "--repl", help="Emojis to replace", type=check_positive, default=4
+        "-p", "--repl", help="Num ngrams to replace", type=check_positive, default=4
     )
     parser.add_argument(
         "-b", "--batch", help="Batch size for encoding", type=check_positive, default=64
