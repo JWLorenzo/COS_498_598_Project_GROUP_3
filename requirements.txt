@@ -1,4 +1,6 @@
 huggingface_hub==0.27.1
-huggingface_hub==1.10.2
 nltk==3.9.4
 pandas==3.0.2
+spacy==3.8.14
+emoji==2.3.0
+sentence-transformers==5.4.1

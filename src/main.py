@@ -44,6 +44,86 @@ def create_emoji_mapping(
     return [(emoji, np.mean(vec, 0)) for emoji, vec in emoji_mapping]
 
 
+def create_emoji_mapping_phrase(
+    merged: pd.DataFrame, model: SentenceTransformer, nlp: Language, args: Namespace
+) -> list[tuple[str, NDArray[np.float32]]]:
+    # Split the sentence into n-gram chunks and assign each emoji to whichever chunk best matches its unicode short name. Each emoji's centroid is built from chunk vectors smoothed with their immediate neighbors.
+    
+    # Build the universe of emojis we can anchor.
+    emoji_set: set[str] = set(
+        emoji for emojis in merged["emoji_list"].tolist() for emoji in emojis
+    )
+    emoji_names: dict[str, str] = {}
+    for e in emoji_set:
+        name = T.get_emoji_name(e)
+        if name:
+            emoji_names[e] = name
+    dropped = len(emoji_set) - len(emoji_names)
+    if dropped:
+        print(
+            f"[phrase] dropped {dropped}/{len(emoji_set)} emojis without unicode names"
+        )
+ 
+    # Encode all anchor names in one batch.
+    anchor_emojis: list[str] = list(emoji_names.keys())
+    anchor_names: list[str] = [emoji_names[e] for e in anchor_emojis]
+    anchor_vecs: NDArray[np.float32] = encoder(model, anchor_names, args)
+    anchor_lookup: dict[str, NDArray[np.float32]] = {
+        e: anchor_vecs[i] for i, e in enumerate(anchor_emojis)
+    }
+ 
+    # Tokenize/clean every row -> then generate n-gram chunks. 
+    # Flatten chunks across all rows -> one list and encode them in a single batched pass
+    print("[phrase] tokenizing and chunking rows...")
+    texts: list[str] = merged["text"].tolist()
+    cleaned_token_lists = [
+        [tok for tok in doc if not any([tok.is_punct, tok.is_space, tok.is_stop])]
+        for doc in nlp.pipe(texts, batch_size=args.batch, disable=["ner", "parser"])
+    ]
+ 
+    all_chunks: list[str] = []
+    row_offsets: list[int] = [0]
+    for tokens in cleaned_token_lists:
+        chunks = [
+            ng
+            for n in range(1, args.ngram + 1)
+            for ng in T.extract_ngram(tokens, n)
+        ]
+        all_chunks.extend(c[0] for c in chunks)
+        row_offsets.append(len(all_chunks))
+ 
+    print(f"[phrase] encoding {len(all_chunks)} chunks across {len(texts)} rows...")
+    all_vecs: NDArray[np.float32] = encoder(model, all_chunks, args)
+ 
+    # For each row, pick each emoji's best chunk and accumulate a neighbor-smoothed contribution to its centroid.
+    print("[phrase] aligning emojis to chunks...")
+    emoji_lists = merged["emoji_list"].tolist()
+    accumulator: dict[str, list[NDArray[np.float32]]] = {
+        e: [] for e in anchor_emojis
+    }
+    smooth: float = args.smooth
+ 
+    for i, emojis_in_row in enumerate(emoji_lists):
+        lo, hi = row_offsets[i], row_offsets[i + 1]
+        if lo == hi:
+            continue  # row had no usable tokens after cleaning
+        chunk_vecs = all_vecs[lo:hi]
+        for e in emojis_in_row:
+            anchor = anchor_lookup.get(e)
+            if anchor is None:
+                continue
+            sims = chunk_vecs @ anchor
+            best = int(np.argmax(sims))
+            n_lo = max(0, best - 1)
+            n_hi = min(len(chunk_vecs), best + 2)
+            neighbor_mean = chunk_vecs[n_lo:n_hi].mean(axis=0)
+            contribution = smooth * chunk_vecs[best] + (1 - smooth) * neighbor_mean
+            accumulator[e].append(contribution)
+ 
+    # Mean each accumulator into a centroid. Drop emojis with no contributions.
+    return [(e, np.mean(vecs, axis=0)) for e, vecs in accumulator.items() if vecs]
+
+
 def encoder(
     model: SentenceTransformer, t_input: list[str] | str | pd.Series, args: Namespace
 ) -> NDArray[np.float32]:
@@ -66,9 +146,15 @@ def initialize_data(
         merged = merged.dropna(subset=["text", "emoji"])
 
         merged["emoji_list"] = merged["emoji"].apply(T.process_emojis)
-        mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(
-            merged, model, nlp, args
-        )
+
+        if args.phrase:
+            mapping: list[tuple[str, NDArray[np.float32]]] = (
+                create_emoji_mapping_phrase(merged, model, nlp, args)
+            )
+        else:
+            mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(
+                merged, model, nlp, args
+            )
     else:
         merged = pd.DataFrame.from_dict(
             {
@@ -197,6 +283,13 @@ def build_parser() -> ArgumentParser:
     )
     parser.add_argument(
         "-e", "--emoji", help="Use emoji dict instead of corpus", action="store_true"
+    )
+
+    parser.add_argument(
+        "-P", "--phrase", help="Use n-gram chunks anchored by unicode names instead of whole-sentence averaging", action="store_true",
+    )
+    parser.add_argument(
+        "-s", "--smooth", help="Phrase-mode only: weight on best chunk vs. neighbors (default 0.7)", type=float, default=0.7,
     )
 
     parser.add_argument("-v", "--verbose", help="Verbosity", action="store_true")

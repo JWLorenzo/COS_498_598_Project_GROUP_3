@@ -61,3 +61,10 @@ def extract_ngram(tokens: list[Token], n: int) -> list[tuple[str, int, int]]:
             )
         )
     return n_grams
+
+
+def get_emoji_name(e: str) -> str | None:
+    data = emoji.EMOJI_DATA.get(e)
+    if data is None or "en" not in data:
+        return None
+    return data["en"].strip(":").replace("_", " ")
