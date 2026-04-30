@@ -14,7 +14,7 @@ If you have a NVIDIA GPU:
 Go to: https://pytorch.org/get-started/locally/
 and download a CUDA-enabled PyTorch build that matches your system. 
 
-If you don't have an NVIDIA GPU:
+Use flag -g to enable GPU use. 
 
 # 3. Download the spaCy English model
 python -m spacy download en_core_web_sm
