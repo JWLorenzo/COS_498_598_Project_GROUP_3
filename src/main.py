@@ -11,29 +11,34 @@ from argparse import ArgumentParser
 from argparse import Namespace
 from argparse import ArgumentTypeError
 import emoji
+from spacy.tokens import Token
 
 
 def create_emoji_mapping(
     merged: pd.DataFrame, model: SentenceTransformer, nlp: Language, args: Namespace
 ) -> list[tuple[str, NDArray[np.float32]]]:
-    sents: list[str] = T.clean_spaCy_batch(merged["text"].tolist(), nlp, args.batch)
+    if not args.emoji:
+        sents: list[str] = T.clean_spaCy_batch(
+            merged["text"].tolist(), nlp, args.batch, args
+        )
+    else:
+        sents = merged["text"].tolist()
     emoji_set: set[str] = set(
         emoji for emojis in merged["emoji_list"].tolist() for emoji in emojis
     )
     vectors: NDArray[np.float32] = encoder(model, sents, args)
 
-    # This list comprehension is just creating a mapping of emojis to vectors where we add the vector to that associated emojis list if that emoji is in the translated string
-    emoji_mapping: list[tuple[str, list[NDArray[np.float32]]]] = [
-        (
-            emoji,
-            [
-                vector
-                for vector, emojis in zip(vectors, merged["emoji_list"].to_list())
-                if emoji in emojis
-            ],
-        )
-        for emoji in emoji_set
-    ]
+    # This list comprehension is just creating a mapping of emojis to vectors
+    # where we add the vector to that associated emojis list if that emoji is in the translated string
+
+    emoji_mapping: list[tuple[str, list[NDArray[np.float32]]]] = []
+    for em in emoji_set:
+        matched_vectors: list[NDArray[np.float32]] = [
+            vector
+            for vector, emojis in zip(vectors, merged["emoji_list"].tolist())
+            if em in emojis
+        ]
+        emoji_mapping.append((em, matched_vectors))
 
     # We just get all of the emoji - vector pairs, but average the vector
     return [(emoji, np.mean(vec, 0)) for emoji, vec in emoji_mapping]
@@ -65,18 +70,16 @@ def initialize_data(
             merged, model, nlp, args
         )
     else:
-        merged: pd.DataFrame = pd.DataFrame.from_dict(
+        merged = pd.DataFrame.from_dict(
             {
-                "emoji_list": [ej for ej in emoji.EMOJI_DATA],
+                "emoji_list": [[ej] for ej in emoji.EMOJI_DATA],
                 "text": [
                     text["en"].strip(":").replace("_", " ")
                     for text in emoji.EMOJI_DATA.values()
                 ],
             }
         )
-        mapping: list[tuple[str, NDArray[np.float32]]] = create_emoji_mapping(
-            merged, model, nlp, args
-        )
+        mapping = create_emoji_mapping(merged, model, nlp, args)
 
     vectors: NDArray[np.float32] = np.array([vector for _, vector in mapping])
     emojis: list[str] = [emoji for emoji, _ in mapping]
@@ -95,6 +98,14 @@ def get_top_k(similarities: NDArray[np.float32], k: int) -> NDArray[np.intp]:
     return indices[np.argsort(similarities[indices])[::-1]]
 
 
+def overlap(s1: int, e1: int, s2: int, e2: int) -> bool:
+    return not (e1 <= s2 or e2 <= s1)
+
+
+def duplicate(em1: str, em2: str) -> bool:
+    return em1 == em2
+
+
 def get_emoji_slices(
     selection_sorted: list[tuple[tuple[str, int, int], str, np.float32]],
     args: Namespace,
@@ -102,23 +113,19 @@ def get_emoji_slices(
     selected: list[tuple[tuple[str, int, int], str, np.float32]] = []
     count: int = 0
     curr_idx: int = 0
-    running: bool = True
-    while running:
-        enabled: bool = True
-        for ngram in selected:
-            s1: int = selection_sorted[curr_idx][0][1]
-            e1: int = selection_sorted[curr_idx][0][2]
-            s2: int = ngram[0][1]
-            e2: int = ngram[0][2]
-            if not (s1 >= e2 or s2 >= e1):
-                enabled = False
-        if enabled:
+    while count < args.repl or curr_idx < len(selection_sorted):
+        s1: int = selection_sorted[curr_idx][0][1]
+        e1: int = selection_sorted[curr_idx][0][2]
+        no_overlap: bool = not any(
+            overlap(s1, e1, ngram[0][1], ngram[0][2]) for ngram in selected
+        )
+        no_duplicate: bool = not any(
+            duplicate(selection_sorted[curr_idx][1], ngram[1]) for ngram in selected
+        )
+        if no_overlap and no_duplicate:
             selected.append(selection_sorted[curr_idx])
             count += 1
         curr_idx += 1
-
-        if count >= args.repl or curr_idx > len(selection_sorted) - 1:
-            running = False
     return sorted(selected, key=lambda x: float(x[0][1]))
 
 
@@ -134,17 +141,19 @@ def construct_sentence(
     return final_list
 
 
-def main(model: SentenceTransformer, nlp: Language, args: Namespace) -> None:
-    if not D.make_data_dir() or args.rerun:
-        emojis, vec_array = initialize_data(model, nlp, args)
-        D.save_data(vec_array, emojis)
-    else:
-        vec_array, emojis = D.load_data()
+def run_translation(
+    model: SentenceTransformer,
+    nlp: Language,
+    vec_array: NDArray[np.float32],
+    emojis: list[str],
+    args: Namespace,
+) -> None:
+    tokens: list[Token] = T.clean_spaCy_single(args.text, nlp)
 
     n_grams: list[tuple[str, int, int]] = [
         n_gram
         for n in range(1, args.ngram + 1)
-        for n_gram in T.extract_ngram(T.clean_spaCy_single(args.text, nlp), n)
+        for n_gram in T.extract_ngram(tokens, n)
     ]
 
     similarities: NDArray[np.float32] = np.array(
@@ -154,10 +163,10 @@ def main(model: SentenceTransformer, nlp: Language, args: Namespace) -> None:
         ]
     )
 
-    similarity_struct: list[tuple[tuple[str, int, int], str, np.float32]] = [
-        (ngram, emojis[idx := get_top_k(similarity, 1)[-1]], similarity[idx])
-        for ngram, similarity in zip(n_grams, similarities)
-    ]
+    similarity_struct: list[tuple[tuple[str, int, int], str, np.float32]] = []
+    for ngram, similarity in zip(n_grams, similarities):
+        idx: np.intp = get_top_k(similarity, 1)[-1]
+        similarity_struct.append((ngram, emojis[idx], similarity[idx]))
 
     selection_sorted: list[tuple[tuple[str, int, int], str, np.float32]] = sorted(
         similarity_struct, reverse=True, key=lambda x: float(x[2])
@@ -172,27 +181,25 @@ def main(model: SentenceTransformer, nlp: Language, args: Namespace) -> None:
     print(final_list)
 
 
-def check_positive(value: int):
+def check_positive(value: str):
     try:
-        value = int(value)
-        if value <= 0:
-            raise ArgumentTypeError(
-                f"{value} must be a positive integer greater than 0"
-            )
+        val: int = int(value)
+        if val <= 0:
+            raise ArgumentTypeError(f"{val} must be a positive integer greater than 0")
     except ValueError:
         raise Exception(f"{value} is not an integer")
-    return value
+    return val
 
 
-if __name__ == "__main__":
-    nlp: Language = spacy.load("en_core_web_sm")
-
+def build_parser() -> ArgumentParser:
     parser: ArgumentParser = ArgumentParser(
         description="Minimizing Language With Emojis"
     )
     parser.add_argument(
         "-e", "--emoji", help="Use emoji dict instead of corpus", action="store_true"
     )
+
+    parser.add_argument("-v", "--verbose", help="Verbosity", action="store_true")
 
     parser.add_argument("-g", "--gpu", help="Use CUDA?", action="store_true")
     parser.add_argument("-r", "--rerun", help="Rerun the pipeline", action="store_true")
@@ -213,8 +220,32 @@ if __name__ == "__main__":
         type=str,
         default="The quick brown fox jumps over the lazy dog",
     )
+    return parser
 
-    args: Namespace = parser.parse_args()
+
+def parse_args() -> Namespace:
+    return build_parser().parse_args()
+
+
+def main(model: SentenceTransformer, nlp: Language, args: Namespace) -> None:
+    D.make_data_dir()
+    if not D.data_exists() or args.rerun:
+        emojis, vec_array = initialize_data(model, nlp, args)
+        D.save_data(vec_array, emojis)
+    else:
+        vec_array, emojis = D.load_data()
+
+    if not args.rerun:
+        run_translation(model, nlp, vec_array, emojis, args)
+
+    else:
+        print("Vectorization complete")
+
+
+if __name__ == "__main__":
+    nlp: Language = spacy.load("en_core_web_sm")
+
+    args: Namespace = parse_args()
 
     if args.gpu:
         model = SentenceTransformer(C.MODEL, device="cuda")

@@ -1,6 +1,7 @@
 from spacy.tokens import Token
 from spacy.language import Language
 import emoji
+from argparse import Namespace
 
 
 def process_emojis(emoji_str: str) -> list[str]:
@@ -20,11 +21,14 @@ def clean_spaCy_single(text: str, nlp: Language) -> list[Token]:
     return tokens
 
 
-def clean_spaCy_batch(text: list[str], nlp: Language, batch: int) -> list[str]:
+def clean_spaCy_batch(
+    text: list[str], nlp: Language, batch: int, args: Namespace
+) -> list[str]:
     cleaned: list[str] = []
 
     for doc in nlp.pipe(text, batch_size=batch, disable=["ner", "parser"]):
-        print(doc)
+        if args.verbose:
+            print(doc)
         tokens = [
             token
             for token in doc
