@@ -1,6 +1,3 @@
-import pandas as pd
-import a_CONSTANTS as C
-import spacy
 from spacy.tokens import Token
 from spacy.language import Language
 import emoji
