@@ -38,16 +38,6 @@ def clean_spaCy_batch(
     return cleaned
 
 
-def clean_spaCy_non_token(text: str, nlp: Language) -> str:
-    doc = nlp(text)
-    tokens = [
-        token
-        for token in doc
-        if not any([token.is_punct, token.is_space, token.is_stop])
-    ]
-    return " ".join([token.text for token in tokens])
-
-
 def extract_ngram(tokens: list[Token], n: int) -> list[tuple[str, int, int]]:
 
     n_grams: list[tuple[str, int, int]] = []
