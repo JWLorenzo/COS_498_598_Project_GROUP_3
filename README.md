@@ -1,25 +1,45 @@
 # COS_498_NLP_Project - Group 3
 This project augments natural-language sentences with semantically appropriate emojis using sentence-transformer embeddings and per-emoji centroid vectors
 
-# 1. Make a virtual environment
+# 1. Contents
+/chunk_aligned_cache
+- Contains pre encoded vectors and pickled emojis
+
+/src
+- a_CONSTANTS.py
+    - Contains our constants for our program
+
+- load_data.py
+    - Contains the functions related to handling (loading, processing, etc)
+
+- main.py
+    - It's the heart of the project, this is the script you'll call to see our work. See section 7 for examples.
+
+- tokenizer.py
+    - Contains the functions related to tokenizing sentences, cleaning stopwords, spaces, etc. 
+
+/z_data
+- Directory generated after running the main.py script.
+
+# 2. Make a virtual environment
 python -m venv venv
 source venv/bin/activate          # macOS/Linux
 venv\Scripts\activate             # Windows
 
-# 2. Install dependencies
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 2.1 GPU acceleration 
+# 3.1 GPU acceleration 
 If you have a NVIDIA GPU: 
 Go to: https://pytorch.org/get-started/locally/
 and download a CUDA-enabled PyTorch build that matches your system. 
 
 Use flag -g to enable GPU use. 
 
-# 3. Download the spaCy English model
+# 4. Download the spaCy English model
 python -m spacy download en_core_web_sm
 
-# 4. Run the pipeline
+# 5. Run the pipeline
 python src/main.py [arguments]
 
 On the first run, the datasets are downloaded from Hugging Face into z_data/,
@@ -27,7 +47,7 @@ the merged corpus is built, and the emoji centroids are computed and cached as
 z_data/vectors.npy and z_data/emojis.pkl. Subsequent runs reuse the cache
 unless -r / --rerun is passed.
 
-# 5. Arguments
+# 6. Arguments
 Each argument has a short and long form (e.g. `-t` or `--text`).
  
 **`-t`, `--text`** *string, default: "The quick brown fox jumps over the lazy dog"*
@@ -70,7 +90,7 @@ Maximum number of non-overlapping emoji insertions in the output sentence.
 Batch size for the sentence encoder. Larger values are faster on GPU but use
 more memory.
 
-# 6. Examples
+# 7. Examples
 # Default whole-sentence method on a custom sentence
 python src/main.py -t "Rain or shine we play outside all day long"
 

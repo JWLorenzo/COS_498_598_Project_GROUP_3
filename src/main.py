@@ -273,7 +273,7 @@ def check_positive(value: str) -> int:
     return val
 
 
-def build_parser() -> ArgumentParser:
+def build_parser() -> Namespace:
     parser: ArgumentParser = ArgumentParser(
         description="Minimizing Language With Emojis"
     )
@@ -316,11 +316,7 @@ def build_parser() -> ArgumentParser:
         type=str,
         default="The quick brown fox jumps over the lazy dog",
     )
-    return parser
-
-
-def parse_args() -> Namespace:
-    return build_parser().parse_args()
+    return parser.parse_args()
 
 
 def main(model: SentenceTransformer, nlp: Language, args: Namespace) -> None:
@@ -341,7 +337,7 @@ def main(model: SentenceTransformer, nlp: Language, args: Namespace) -> None:
 if __name__ == "__main__":
     nlp: Language = spacy.load("en_core_web_sm")
 
-    args: Namespace = parse_args()
+    args: Namespace = build_parser()
 
     if args.gpu:
         model = SentenceTransformer(C.MODEL, device="cuda")
